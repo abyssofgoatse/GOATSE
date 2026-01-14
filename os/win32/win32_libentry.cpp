@@ -1,0 +1,62 @@
+ 
+
+// win32_libentry.cpp : Defines the entry point for the DLL
+#include <tchar.h>
+#include <windows.h>
+#include "common/common.h"
+#include "core/core.h"
+#include "hooks/hooks.h"
+#include "strings/string_utils.h"
+
+static BOOL add_hooks()
+{
+  wchar_t curFile[512];
+  GetModuleFileNameW(NULL, curFile, 512);
+
+  rdcstr f = get_basename(strlower(StringFormat::Wide2UTF8(curFile)));
+
+  // bail immediately if we're in a system process. We don't want to hook, log, anything -
+  // this instance is being used for a shell extension.
+  if(f == "dllhost.exe" || f == "explorer.exe")
+  {
+#if ENABLED(RDOC_RELEASE)
+    OutputDebugStringA(
+        "Detecting shell process! Disabling hooking in dllhost.exe or explorer.exe\n");
+#endif
+    return TRUE;
+  }
+
+  // search for an exported symbol with this name, typically renderdoc__replay__marker
+  if(LibraryHooks::Detect(STRINGIZE(RDOC_BASE_NAME) "__replay__marker"))
+  {
+    RDCDEBUG("Not creating hooks - in replay app");
+
+    RenderDoc::Inst().SetReplayApp(true);
+
+    RenderDoc::Inst().Initialise();
+
+    LibraryHooks::ReplayInitialise();
+
+    return true;
+  }
+
+  RenderDoc::Inst().Initialise();
+
+  RDCLOG("Loading into %ls", curFile);
+
+  LibraryHooks::RegisterHooks();
+
+  return TRUE;
+}
+
+BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved)
+{
+  if(ul_reason_for_call == DLL_PROCESS_ATTACH)
+  {
+    BOOL ret = add_hooks();
+    SetLastError(0);
+    return ret;
+  }
+
+  return TRUE;
+}
